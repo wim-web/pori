@@ -1,0 +1,8 @@
+#!/bin/bash
+# Only the pinned USB package's cgo dependency; no global pkg-config installation.
+set -euo pipefail
+case " $* " in
+  *" --cflags "*) printf -- '-I"%s/include"\n' "$PORI_LIBUSB_DIR" ;;
+  *" --libs "*) printf -- '-L"%s/lib" -lusb-1.0\n' "$PORI_LIBUSB_DIR" ;;
+  *) exit 1 ;;
+esac

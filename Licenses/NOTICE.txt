@@ -1,12 +1,13 @@
 Pori prototype third-party components
 
-Kalam and libusb are copied at build time from a local OpenMTP installation.
-The repository does not distribute those engine binaries. The prototype was
-validated with OpenMTP 3.3.0 arm64; version details below refer to that build.
+Kalam is rebuilt at build time from pinned OpenMTP source with Pori's
+Native/Move/*.go extension. libusb is copied from a local OpenMTP installation.
+The repository does not distribute those engine binaries.
 OpenMTP: https://github.com/ganeshrvel/openmtp (MIT; license included).
-Kalam source: https://github.com/ganeshrvel/openmtp/tree/v3.3.0/ffi/kalam/native
-Dependency versions recorded from the actual Kalam binary:
-  Go 1.19.5
+Kalam source: https://github.com/ganeshrvel/openmtp/tree/5da350b69c6d0d4aed67a063498ee89c7448400a/ffi/kalam/native
+The source archive SHA-256 is checked in Tools/build-kalam.sh.
+Go compiler version: local Go toolchain (tested with Go 1.27.2).
+Pinned dependencies (upstream go.mod/go.sum retained):
   github.com/ganeshrvel/go-mtpfs 1c3302b3c476
   github.com/ganeshrvel/go-mtpx 18f12db021cc
   github.com/ganeshrvel/usb 14d96f5ae403
@@ -15,7 +16,7 @@ Dependency versions recorded from the actual Kalam binary:
   github.com/modern-go/reflect2 v1.0.2
 
 The go-mtpx source revision has no standalone license file in its repository root;
-this prototype retains the bundled OpenMTP engine and its accompanying MIT notice.
+this repository references that pinned upstream dependency without vendoring it.
 https://github.com/ganeshrvel/go-mtpx/tree/18f12db021cc
 
 libusb 1.0.26 (LGPL-2.1 or later). COPYING and upstream source archive included.

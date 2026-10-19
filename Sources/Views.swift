@@ -41,6 +41,7 @@ struct ContentView: View {
             Button("閉じる", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "") }
         .sheet(item: $model.nameEditRequest) { request in NameEditorView(model: model, request: request) }
+        .sheet(item: $model.moveRequest) { request in MovePickerView(model: model, request: request) }
     }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -294,6 +295,7 @@ struct AndroidView: View {
                 Button("新規フォルダ…") { model.newFolder() }.disabled(model.busy)
                 if let folder = selectedFolder(selected) { Button("フォルダを開く") { model.browse(folder.path) } }
                 Button("名前を変更…") { model.rename(selected) }.disabled(selected.count != 1 || model.busy)
+                Button("別のフォルダに移動…") { model.beginMove(selected) }.disabled(selected.isEmpty || model.busy || !model.supportsMove)
                 Button("Macに保存") { model.selectedRemote = selected; model.download() }.disabled(selected.isEmpty || model.busy)
                 Divider()
                 Button("Androidから削除…", role: .destructive) { model.confirmDeletion(selected) }.disabled(selected.isEmpty || model.busy)
@@ -315,6 +317,7 @@ struct AndroidView: View {
             HStack {
                 Button { model.download() } label: { Label("Macに保存", systemImage: "arrow.down.to.line") }.disabled(model.selectedRemote.isEmpty || model.busy)
                 Button { model.rename() } label: { Image(systemName: "pencil") }.help("名前を変更").accessibilityLabel("名前を変更").disabled(model.selectedRemote.count != 1 || model.busy)
+                Button { model.beginMove() } label: { Image(systemName: "arrow.right") }.help(model.supportsMove ? "別のフォルダに移動" : "この端末はUSB経由の移動に非対応です").accessibilityLabel("別のフォルダに移動").disabled(model.selectedRemote.isEmpty || model.busy || !model.supportsMove)
                 Button(role: .destructive) { model.confirmDeletion() } label: { Label("削除…", systemImage: "trash") }.disabled(model.selectedRemote.isEmpty || model.busy)
                 Spacer(minLength: 4)
                 if let storage = model.selectedStorage { Text("空き \(byteString(storage.free))").font(.system(size: 10)).foregroundStyle(.secondary) }

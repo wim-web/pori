@@ -18,6 +18,7 @@ static void echoRequest(char *input, cb *c) {
 void DeleteFile(char *input, cb *c) { echoRequest(input, c); }
 void MakeDirectory(char *input, cb *c) { echoRequest(input, c); }
 void RenameFile(char *input, cb *c) { echoRequest(input, c); }
+void MoveFiles(char *input, cb *c) { echoRequest(input, c); }
 void UploadFiles(char *input, cb *pre, cb *progress, cb *done) {
     emit(pre, "{\"error\":\"\",\"data\":{\"name\":\"日本語.txt\",\"size\":5000000000}}");
     emit(progress, "{\"error\":\"\",\"data\":{\"name\":\"日本語.txt\",\"bulkFileSize\":{\"total\":5000000000,\"sent\":2500000000}}}");

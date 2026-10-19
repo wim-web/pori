@@ -25,6 +25,8 @@ with tempfile.TemporaryDirectory(prefix="pori-protocol-") as directory:
     invalid_name_requests += [("rename", {"storageId": 65537, "fullPath": "/", "newFileName": "root"})]
     for command, arguments in invalid_name_requests:
         requests.append({"id": len(requests) + 1, "command": command, "payload": arguments})
+    move_payload = {"storageId": 65537, "sourceParent": "/From", "destination": "/To", "sources": [{"path": "/From/日本語.txt", "objectId": 123}]}
+    requests.append({"id": len(requests) + 1, "command": "move", "payload": move_payload})
     payload = "".join(json.dumps(request) + "\n" for request in requests)
     output = subprocess.run([str(root / "Pori.app/Contents/MacOS/mtp-helper"), str(fake)], input=payload, text=True, capture_output=True, check=True, timeout=10)
     rows = [json.loads(line) for line in output.stdout.splitlines()]
@@ -38,7 +40,8 @@ with tempfile.TemporaryDirectory(prefix="pori-protocol-") as directory:
     assert completed[7]["result"]["testRequest"] == delete_payload
     for index, (_, arguments) in enumerate(valid_name_requests, start=12):
         assert completed[index]["result"]["testRequest"] == arguments
-    for rejected in completed[8:12] + completed[14:]:
+    assert completed[-1]["result"]["testRequest"] == move_payload
+    for rejected in completed[8:12] + completed[14:-1]:
         assert rejected["result"]["errorType"] == "ProtocolError"
         assert "testRequest" not in rejected["result"]
-print("Native bridge: progress, Unicode, large sizes, device errors, delete/mkdir/rename payloads and invalid-target rejection passed")
+print("Native bridge: progress, Unicode, large sizes, device errors, delete/mkdir/rename/move payloads and invalid-target rejection passed")

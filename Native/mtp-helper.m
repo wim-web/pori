@@ -57,8 +57,9 @@ int main(int argc, const char *argv[]) {
         Simple init = dlsym(lib, "Initialize"), storages = dlsym(lib, "FetchStorages"), dispose = dlsym(lib, "Dispose");
         Input walk = dlsym(lib, "Walk"), exists = dlsym(lib, "FileExists"), deleteFile = dlsym(lib, "DeleteFile");
         Input mkdir = dlsym(lib, "MakeDirectory"), rename = dlsym(lib, "RenameFile");
+        Input moveFiles = dlsym(lib, "MoveFiles");
         Transfer upload = dlsym(lib, "UploadFiles"), download = dlsym(lib, "DownloadFiles");
-        if (!init || !storages || !dispose || !walk || !exists || !deleteFile || !mkdir || !rename || !upload || !download) return 70;
+        if (!init || !storages || !dispose || !walk || !exists || !deleteFile || !mkdir || !rename || !moveFiles || !upload || !download) return 70;
         char *line = NULL; size_t capacity = 0; ssize_t length;
         while ((length = getline(&line, &capacity, stdin)) > 0) {
             @autoreleasepool {
@@ -73,6 +74,7 @@ int main(int argc, const char *argv[]) {
                 else if ([command isEqual:@"storages"]) storages((Callback *)done);
                 else if ([command isEqual:@"list"]) walk(input, (Callback *)done);
                 else if ([command isEqual:@"exists"]) exists(input, (Callback *)done);
+                else if ([command isEqual:@"move"]) moveFiles(input, (Callback *)done);
                 else if ([command isEqual:@"mkdir"] || [command isEqual:@"rename"]) {
                     NSDictionary *arguments = request[@"payload"];
                     id fullPath = arguments[@"fullPath"];

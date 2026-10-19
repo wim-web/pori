@@ -9,8 +9,9 @@ func runSelfTests() throws {
     let raw: [[String: Any]] = [["Sid": 65537, "Info": ["StorageDescription": "Internal storage", "FreeSpaceInBytes": Int64(9_000_000_000)]]]
     let storages = try Storage.parse(raw)
     try check(storages.first?.id == 65537 && storages.first?.free == 9_000_000_000, "Storage schema / 64-bit size")
-    let files = try RemoteFile.parse([["name": "動画.mp4", "path": "/動画.mp4", "size": Int64(5_000_000_000), "isFolder": false], ["name": "Download", "path": "/Download", "size": 0, "isFolder": true]])
+    let files = try RemoteFile.parse([["name": "動画.mp4", "path": "/動画.mp4", "size": Int64(5_000_000_000), "isFolder": false, "objectId": 123], ["name": "Download", "path": "/Download", "size": 0, "isFolder": true]])
     try check(files[0].isFolder && files[1].size == 5_000_000_000, "Directory ordering / large file")
+    try check(files[1].objectId == 123, "Decode object identity for move preflight")
     try check(try TransferRules.remotePath("/", "日本語 file.pdf") == "/日本語 file.pdf", "Unicode path")
     try rejects({ _ = try TransferRules.remotePath("/", "../escape") }, "Traversal")
     try rejects({ try TransferRules.verifyNoConflicts([["fullpath": "/a", "exists": true]], targets: ["/a"]) }, "Overwrite")
@@ -30,6 +31,13 @@ func runSelfTests() throws {
     try rejects({ _ = try TransferRules.renameTarget([], files: deleteFiles, parent: "/Download") }, "Empty rename selection")
     try rejects({ _ = try TransferRules.renameTarget(Set(deleteFiles.map(\.path)), files: deleteFiles, parent: "/Download") }, "Multiple rename selection")
     try rejects({ _ = try TransferRules.renameTarget([deleteFiles[0].path], files: deleteFiles, parent: "/Pictures") }, "Rename from wrong parent")
+    let moving = [RemoteFile(name: "Folder", path: "/From/Folder", size: 0, isFolder: true, objectId: 11)]
+    try TransferRules.validateMove(moving, from: "/From", to: "/To")
+    try TransferRules.validateMove(moving, from: "/From", to: "/")
+    for invalid in ["/From", "/From/Folder", "/From/Folder/Nested", "relative", "/To/../From"] {
+        try rejects({ try TransferRules.validateMove(moving, from: "/From", to: invalid) }, "Invalid move destination")
+    }
+    try rejects({ try TransferRules.validateMove(deleteFiles, from: "/Download", to: "/To") }, "Missing object IDs")
     try rejects({ _ = try TransferRules.deletionTargets([], files: deleteFiles, parent: "/Download") }, "Empty deletion")
     try rejects({ _ = try TransferRules.deletionTargets(["/Download/missing"], files: deleteFiles, parent: "/Download") }, "Stale selection")
     try rejects({ _ = try TransferRules.deletionTargets([deleteFiles[0].path], files: deleteFiles, parent: "/Pictures") }, "Wrong parent")

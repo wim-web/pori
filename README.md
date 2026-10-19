@@ -4,7 +4,7 @@ AndroidにはUSB、iPhone / iPadにはAirDropでファイルを送る、SwiftUI�
 
 ## ビルドして使う
 
-XcodeのSwiftコンパイラと、Apple Silicon版の[OpenMTP](https://github.com/ganeshrvel/openmtp)を用意してください。試作ではOpenMTP 3.3.0のエンジンを使用しています。
+XcodeのSwiftコンパイラ、Go（1.27で検証）、Apple Silicon版の[OpenMTP](https://github.com/ganeshrvel/openmtp)を用意してください。OpenMTP 3.3.0同梱のlibusbを使用しています。
 
 ```sh
 git clone https://github.com/wim-web/pori.git
@@ -13,7 +13,7 @@ bash build.sh
 open Pori.app
 ```
 
-リポジトリにはソースを収録しています。`build.sh` は `/Applications/OpenMTP.app` から転送エンジンを読み取り、生成する `Pori.app` にコピーします。元のOpenMTPは変更しません。ビルド後はOpenMTPを起動せずに使えます。
+リポジトリにはソースを収録しています。`build.sh` は固定したOpenMTPソースを取得・ハッシュ検証し、Poriの端末内移動機能を加えてKalamをビルドします。libusbは `/Applications/OpenMTP.app` から読み取って同梱します。元のOpenMTPは変更しません。初回ビルドにはソースとGo依存パッケージのダウンロードが必要です。ビルド後はOpenMTPを起動せずに使えます。
 
 ## iPhone / iPadに送る
 
@@ -37,6 +37,14 @@ macOSからのコールバックだけでは相手での受信完了を判定で
 
 フォルダを移動しても追加済みのファイルは保持されます。Androidのカードにドロップした場合も、そのままフォルダを選びながら送れる画面を開きます。送信中は保存先の変更を無効にし、開始時点のフォルダとストレージを固定します。
 
+### Android内で別のフォルダへ移動
+
+左側で項目を選び、右向き矢印ボタンか右クリックの「別のフォルダに移動…」を使います。移動先のフォルダをたどり、「ここに移動」を押してください。複数のファイル・フォルダを同じストレージ内で移動できます。
+
+同名項目、フォルダ自身や子孫への移動、移動元と同じフォルダは拒否します。移動直前に端末側の項目IDと移動先を確認します。USBのMoveObjectに対応していない端末では操作を無効にします。Macへのダウンロード・再アップロード・元ファイル削除による代替は行いません。
+
+途中で切断された場合、すでに完了した項目だけ移動済みになっている場合があります。自動でやり直したり戻したりせず、移動元と移動先を確認するメッセージを表示します。
+
 ### フォルダ作成と名前変更
 
 左側の「新規フォルダ」から、現在開いている場所にフォルダを作成できます。名前変更は1つのファイルまたはフォルダを選び、鉛筆ボタンか右クリックの「名前を変更…」を使います。ファイルの場合は拡張子も含めた名前を入力します。
@@ -57,11 +65,11 @@ Androidは1台ずつ接続します。USB送信は同名項目があると停止
 
 - UI: SwiftUI + AppKit。ネイティブのMacアプリです。
 - AirDrop: `NSSharingService(.sendViaAirDrop)`。
-- USB: OpenMTP 3.3.0のKalam / libusbを別プロセスのObjective-Cブリッジ経由で呼び出します。
+- USB: OpenMTPのKalamに `Native/Move/` の移動機能を追加し、別プロセスのObjective-Cブリッジ経由で呼び出します。
 - `Sources/`: Swiftソース。`Native/`: USBブリッジ。`Tests/`: テスト専用の転送エンジン模擬実装。
 - テスト用ファイルは `Samples/お試し.txt`。
 
-XcodeのSwiftコンパイラと、`/Applications/OpenMTP.app` のarm64エンジンがあれば `bash build.sh` で再ビルドできます。別のエンジン配置は `PORI_ENGINE_DIR` で指定できます。ローカル用のアドホック署名を付与します。App Store配布や公証は行っていません。
+Swiftコンパイラ、Go、`/Applications/OpenMTP.app` のarm64 libusbがあれば `bash build.sh` で再ビルドできます。libusbの配置は `PORI_ENGINE_DIR` で指定できます。ビルド用ヘッダーは同梱のlibusbソースから展開するため、pkg-configのインストールは不要です。ローカル用のアドホック署名を付与します。App Store配布や公証は行っていません。
 
 ```sh
 bash build.sh
@@ -79,6 +87,8 @@ python3 Tests/protocol-test.py
 削除は、模擬エンジンで複数パスとストレージIDの受け渡し・不正な対象の拒否を検証しています。実機では確認画面の表示とキャンセル後のファイル保持を確認しました。実機ファイルを実際に削除するテストは行っていません。
 
 フォルダ作成と名前変更は、Android実機で確認用の空フォルダを作成し、日本語を含む名前へ変更して一覧への反映を確認しています。同名フォルダの作成拒否と、不正な名前で入力画面の実行ボタンが無効になることも確認しました。ファイル名変更は、共通のコマンドと検証処理を模擬エンジン・自動テストで検証しています。
+
+端末内移動はGoの模擬デバイスで、通常移動、ルートへの移動、同名衝突、古い項目ID、自己・子孫への移動、途中失敗時の動作を検証しています。実機ではMoveObject対応の認識、移動先選択、自己フォルダの選択防止、キャンセルまで確認しました。実機ファイルを実際に別フォルダへ移動するテストは行っていません。
 
 ## ライセンス
 

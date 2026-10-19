@@ -21,6 +21,7 @@ struct RemoteFile: Identifiable, Decodable {
     let path: String
     let size: Int64
     let isFolder: Bool
+    var objectId: UInt32? = nil
     var id: String { path }
     var icon: String { isFolder ? "folder.fill" : fileIcon(name) }
     static func parse(_ raw: Any) throws -> [RemoteFile] {
@@ -58,6 +59,13 @@ struct NameEditRequest: Identifiable {
     var action: String { source == nil ? "作成" : "変更" }
     var initialName: String { source?.name ?? "新規フォルダ" }
 }
+struct MoveRequest: Identifiable {
+    let id = UUID()
+    let storageID: UInt32
+    let storageName: String
+    let sourceParent: String
+    let items: [RemoteFile]
+}
 func fileIcon(_ name: String) -> String {
     let ext = (name as NSString).pathExtension.lowercased()
     if ["jpg", "jpeg", "png", "heic", "gif", "webp"].contains(ext) { return "photo" }
@@ -69,6 +77,22 @@ func fileIcon(_ name: String) -> String {
 func byteString(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
 
 enum TransferRules {
+    static func validateMove(_ items: [RemoteFile], from parent: String, to destination: String) throws {
+        guard !items.isEmpty, parent.hasPrefix("/"), destination.hasPrefix("/"),
+              (parent as NSString).standardizingPath == parent,
+              (destination as NSString).standardizingPath == destination,
+              !destination.contains("\\"), !destination.contains("\0"), destination != parent else {
+            throw TransferError(message: "現在のフォルダ以外の移動先を選んでください。")
+        }
+        for item in items {
+            guard item.path == (try remotePath(parent, item.name)), let id = item.objectId, id != 0, id != UInt32.max else {
+                throw TransferError(message: "移動対象を確認できません。一覧を更新してください。")
+            }
+            guard destination != item.path, !destination.hasPrefix(item.path + "/") else {
+                throw TransferError(message: "フォルダ自身や、その中には移動できません。")
+            }
+        }
+    }
     static func editingPath(_ parent: String, name: String) throws -> String {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TransferError(message: "名前を入力してください。")
@@ -153,6 +177,11 @@ enum TransferRules {
     @Published var confirmingDeletion = false
     @Published var nameEditRequest: NameEditRequest?
     @Published var editingRemote = false
+    @Published var moveRequest: MoveRequest?
+    @Published var movePath = "/"
+    @Published var moveFolders: [RemoteFile] = []
+    @Published var moveError: String?
+    @Published var supportsMove = false
     @Published var progress: Double?
     @Published var progressText = ""
     @Published var status = "ファイルを追加して、送り先を選んでください。"
@@ -161,7 +190,7 @@ enum TransferRules {
     let backend = MTPBackend()
     let airDrop = AirDropSender()
     private var cancelRequested = false
-    var busy: Bool { busyUSB || busyAirDrop || confirmingDeletion || nameEditRequest != nil }
+    var busy: Bool { busyUSB || busyAirDrop || confirmingDeletion || nameEditRequest != nil || moveRequest != nil }
     var selectedStorage: Storage? { storages.first { $0.id == storageID } }
     var filteredFiles: [RemoteFile] { search.isEmpty ? files : files.filter { $0.name.localizedCaseInsensitiveContains(search) } }
     var destinationFolderName: String { path == "/" ? "ストレージの先頭" : (path as NSString).lastPathComponent }
@@ -295,6 +324,7 @@ enum TransferRules {
                 let raw = try await backend.call("connect")
                 let info = (raw as? [String: Any])?["mtpDeviceInfo"] as? [String: Any]
                 deviceName = info?["Model"] as? String ?? "Android"
+                supportsMove = (info?["OperationsSupported"] as? [NSNumber] ?? []).contains { $0.uint16Value == 0x1019 }
                 let newStorages = try Storage.parse(try await backend.call("storages"))
                 guard let first = newStorages.first else { throw TransferError(message: "ストレージが見つかりません。端末のロックを解除してください。") }
                 storages = newStorages
@@ -319,6 +349,8 @@ enum TransferRules {
     func resetUSB() {
         backend.stop()
         connected = false
+        supportsMove = false
+        moveRequest = nil
         files = []
         storages = []
         selectedRemote = []
@@ -343,6 +375,72 @@ enum TransferRules {
         }
     }
     func up() { browse(path == "/" ? "/" : (path as NSString).deletingLastPathComponent) }
+
+    func beginMove(_ selection: Set<String>? = nil) {
+        guard connected, !busy else { return }
+        guard supportsMove else { report(TransferError(message: "この端末はUSB経由のフォルダ間移動に対応していません。")); return }
+        do {
+            let targets = try TransferRules.deletionTargets(selection ?? selectedRemote, files: files, parent: path)
+            guard targets.allSatisfy({ ($0.objectId ?? 0) != 0 }) else { throw TransferError(message: "項目の情報を取得し直してください。") }
+            let request = MoveRequest(storageID: storageID, storageName: selectedStorage?.name ?? "Android", sourceParent: path, items: targets)
+            moveRequest = request
+            movePath = path
+            loadMoveFolder(request, path: path)
+        } catch { report(error) }
+    }
+
+    func loadMoveFolder(_ request: MoveRequest, path folder: String) {
+        guard moveRequest?.id == request.id, !busyUSB else { return }
+        busyUSB = true
+        moveError = nil
+        moveFolders = []
+        movePath = folder
+        Task {
+            defer { busyUSB = false }
+            do {
+                let data = try await backend.call("list", ["storageId": request.storageID, "fullPath": folder, "recursive": false, "skipHiddenFiles": false, "skipDisallowedFiles": false])
+                guard moveRequest?.id == request.id else { return }
+                moveFolders = try RemoteFile.parse(data).filter(\.isFolder)
+            } catch { if moveRequest?.id == request.id { moveError = error.localizedDescription } }
+        }
+    }
+
+    func commitMove(_ request: MoveRequest) {
+        guard moveRequest?.id == request.id, connected, !busyUSB, !busyAirDrop, storageID == request.storageID, path == request.sourceParent, moveError == nil else { return }
+        let destinationPath = movePath
+        do { try TransferRules.validateMove(request.items, from: request.sourceParent, to: destinationPath) }
+        catch { moveError = error.localizedDescription; return }
+        moveRequest = nil
+        busyUSB = true
+        editingRemote = true
+        status = "\(request.items.count)項目を\(destinationPath)へ移動しています…"
+        Task {
+            defer { busyUSB = false; editingRemote = false }
+            do {
+                let sources = request.items.map { ["path": $0.path, "objectId": $0.objectId!] as [String: Any] }
+                let result = try await backend.call("move", ["storageId": request.storageID, "sourceParent": request.sourceParent, "destination": destinationPath, "sources": sources])
+                guard result as? Bool == true else { throw TransferError(message: "移動結果を確認できませんでした。") }
+                record("Android内で移動", "\(request.items.count)項目 · \(request.sourceParent) → \(destinationPath)", success: true)
+                path = destinationPath
+                search = ""
+                do {
+                    try await loadFolder()
+                    selectedRemote = Set(try request.items.map { try TransferRules.remotePath(destinationPath, $0.name) })
+                    status = "\(request.items.count)項目を\(destinationPath)へ移動しました。"
+                } catch {
+                    resetUSB()
+                    status = "移動は完了しました。一覧を更新するには再接続してください。"
+                    report(error)
+                }
+            } catch {
+                let failure = error.localizedDescription
+                do { try await loadFolder() } catch { resetUSB() }
+                status = "移動の完了を確認できませんでした。"
+                record("移動結果の確認が必要", "\(request.sourceParent) → \(destinationPath)", success: false)
+                report(TransferError(message: "\(failure)\n\n一部が移動済みの可能性があります。移動元 \(request.sourceParent) と移動先 \(destinationPath) を確認してください。"))
+            }
+        }
+    }
 
     func newFolder() {
         guard connected, !busy else { return }

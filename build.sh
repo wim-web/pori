@@ -5,13 +5,15 @@ PORI_APP="$PORI_ROOT/Pori.app"
 PORI_ENGINE="${PORI_ENGINE_DIR:-/Applications/OpenMTP.app/Contents/Resources/bin/arm64}"
 PORI_CACHE="$PORI_ROOT/.build/module-cache"
 mkdir -p "$PORI_APP/Contents/MacOS" "$PORI_APP/Contents/Frameworks" "$PORI_APP/Contents/Resources/Licenses" "$PORI_CACHE"
-for name in kalam.dylib libusb.dylib; do
+for name in libusb.dylib; do
     if [ ! -f "$PORI_ENGINE/$name" ]; then
         printf 'Missing engine: %s\nSet PORI_ENGINE_DIR to the OpenMTP arm64 engine directory.\n' "$PORI_ENGINE/$name" >&2
         exit 1
     fi
     cp "$PORI_ENGINE/$name" "$PORI_APP/Contents/Frameworks/$name"
 done
+bash "$PORI_ROOT/Tools/build-kalam.sh"
+cp "$PORI_ROOT/.build/kalam.dylib" "$PORI_APP/Contents/Frameworks/kalam.dylib"
 cp "$PORI_ROOT/Licenses/"* "$PORI_APP/Contents/Resources/Licenses/"
 cp "$PORI_ROOT/Info.plist" "$PORI_APP/Contents/Info.plist"
 xcrun clang -fobjc-arc -O2 -mmacosx-version-min=14.0 "$PORI_ROOT/Native/mtp-helper.m" -framework Foundation -o "$PORI_APP/Contents/MacOS/mtp-helper"

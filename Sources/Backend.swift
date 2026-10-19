@@ -57,7 +57,7 @@ struct TransferError: LocalizedError {
         try start()
         nextID += 1
         pendingID = nextID
-        timeoutSeconds = ["upload", "download", "delete"].contains(command) ? 120 : 30
+        timeoutSeconds = ["upload", "download", "delete", "move"].contains(command) ? 120 : 30
         var bytes = try JSONSerialization.data(withJSONObject: ["id": nextID, "command": command, "payload": payload])
         bytes.append(10)
         return try await withCheckedThrowingContinuation { continuation in
