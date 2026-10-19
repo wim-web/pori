@@ -118,6 +118,18 @@ enum TransferRules {
     var busy: Bool { busyUSB || busyAirDrop }
     var selectedStorage: Storage? { storages.first { $0.id == storageID } }
     var filteredFiles: [RemoteFile] { search.isEmpty ? files : files.filter { $0.name.localizedCaseInsensitiveContains(search) } }
+    var destinationFolderName: String { path == "/" ? "ストレージの先頭" : (path as NSString).lastPathComponent }
+    var destinationLabel: String { "\(selectedStorage?.name ?? "Android")\(path)" }
+
+    func selectPage(_ next: Page) {
+        page = next
+        if next == .android { destination = .android }
+        if next == .send { destination = .airdrop }
+    }
+    func selectDestination(_ target: Destination) {
+        destination = target
+        page = target == .android ? .android : .send
+    }
 
     init() {
         backend.onProgress = { [weak self] data in
@@ -163,6 +175,7 @@ enum TransferRules {
     }
     func receiveDrop(_ providers: [NSItemProvider], target: Destination? = nil) -> Bool {
         guard !busy else { return false }
+        let dropDestination = target ?? (page == .android ? .android : .airdrop)
         let accepted = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !accepted.isEmpty else { return false }
         let group = DispatchGroup()
@@ -181,8 +194,7 @@ enum TransferRules {
         }
         group.notify(queue: .main) { [weak self] in
             guard let self, !self.busy else { return }
-            if let target { self.destination = target }
-            self.page = .send
+            self.selectDestination(dropDestination)
             self.add(urls)
         }
         return true
@@ -191,6 +203,11 @@ enum TransferRules {
     func send() {
         guard !queue.isEmpty, !busy else { return }
         if destination == .airdrop { sendAirDrop() } else { upload() }
+    }
+    func sendToAndroid() {
+        guard !queue.isEmpty, !busy else { return }
+        selectDestination(.android)
+        upload()
     }
     private func sendAirDrop() {
         let urls = queue.map(\.url)
@@ -284,6 +301,9 @@ enum TransferRules {
     private func upload() {
         guard connected else { report(TransferError(message: "先にAndroidへUSB接続してください。")); return }
         let urls = queue.map(\.url)
+        let destinationPath = path
+        let destinationStorageID = storageID
+        let destinationDescription = destinationLabel
         busyUSB = true
         cancelRequested = false
         transferring = true
@@ -296,17 +316,23 @@ enum TransferRules {
                 // Validate folders off the UI thread; never follow symbolic links.
                 try await Task.detached { try TransferRules.validateUpload(urls) }.value
                 guard !cancelRequested else { throw TransferError(message: "送信を中止しました。") }
-                let targets = try urls.map { try TransferRules.remotePath(path, $0.lastPathComponent) }
-                let existing = try await backend.call("exists", ["storageId": storageID, "Files": targets])
+                let targets = try urls.map { try TransferRules.remotePath(destinationPath, $0.lastPathComponent) }
+                let existing = try await backend.call("exists", ["storageId": destinationStorageID, "Files": targets])
                 try TransferRules.verifyNoConflicts(existing, targets: targets)
                 guard !cancelRequested else { throw TransferError(message: "送信を中止しました。") }
                 writing = true
                 status = "Androidへ送信しています…"
-                _ = try await backend.call("upload", ["storageId": storageID, "sources": urls.map(\.path), "destination": path, "preprocessFiles": true])
+                _ = try await backend.call("upload", ["storageId": destinationStorageID, "sources": urls.map(\.path), "destination": destinationPath, "preprocessFiles": true])
                 queue.removeAll { urls.contains($0.url) }
-                record("Androidへ送信", "\(urls.count)項目 → \(path)", success: true)
-                status = "\(urls.count)項目をAndroidに送りました。"
-                try await loadFolder()
+                record("Androidへ送信", "\(urls.count)項目 → \(destinationDescription)", success: true)
+                status = "\(urls.count)項目を\(destinationDescription)に送りました。"
+                // A refresh failure must not turn an already completed transfer into a failed one.
+                do { try await loadFolder() }
+                catch {
+                    resetUSB()
+                    status = "送信は完了しました。一覧を更新するには再接続してください。"
+                    report(error)
+                }
             } catch {
                 if writing {
                     record("USB送信未完了", "転送途中のファイルが残る場合があります。", success: false)

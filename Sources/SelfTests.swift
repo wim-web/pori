@@ -27,4 +27,22 @@ func runSelfTests() throws {
     try rejects({ try TransferRules.validateUpload([link]) }, "Symlink")
     try rejects({ try TransferRules.validateUpload([root]) }, "Nested symlink")
     try rejects({ try TransferRules.validateUpload([file, file]) }, "Duplicate filenames")
+    try MainActor.assumeIsolated {
+        let model = AppModel()
+        model.add([file])
+        model.storages = [Storage(id: 65537, name: "Internal", free: 1000), Storage(id: 131073, name: "SD card", free: 1000)]
+        model.storageID = 65537
+        model.path = "/Download/Books"
+        model.selectDestination(.android)
+        try check(model.page == .android && model.destination == .android, "Android routes to folder workspace")
+        try check(model.queue.count == 1 && model.destinationLabel == "Internal/Download/Books", "Queue retained alongside exact destination")
+        model.selectPage(.send)
+        try check(model.destination == .airdrop && model.queue.count == 1, "Returning to AirDrop cannot silently send over USB")
+        model.selectPage(.android)
+        model.storageID = 131073
+        try check(model.destination == .android && model.destinationLabel == "SD card/Download/Books", "Storage is part of destination")
+        try check(model.destinationFolderName == "Books", "Nested folder button label")
+        model.path = "/"
+        try check(model.destinationFolderName == "ストレージの先頭", "Root folder button label")
+    }
 }
