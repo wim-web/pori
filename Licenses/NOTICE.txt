@@ -1,0 +1,31 @@
+Pori prototype third-party components
+
+Kalam and libusb are copied at build time from a local OpenMTP installation.
+The repository does not distribute those engine binaries. The prototype was
+validated with OpenMTP 3.3.0 arm64; version details below refer to that build.
+OpenMTP: https://github.com/ganeshrvel/openmtp (MIT; license included).
+Kalam source: https://github.com/ganeshrvel/openmtp/tree/v3.3.0/ffi/kalam/native
+Dependency versions recorded from the actual Kalam binary:
+  Go 1.19.5
+  github.com/ganeshrvel/go-mtpfs 1c3302b3c476
+  github.com/ganeshrvel/go-mtpx 18f12db021cc
+  github.com/ganeshrvel/usb 14d96f5ae403
+  github.com/json-iterator/go v1.1.12
+  github.com/modern-go/concurrent bacd9c7ef1dd
+  github.com/modern-go/reflect2 v1.0.2
+
+The go-mtpx source revision has no standalone license file in its repository root;
+this prototype retains the bundled OpenMTP engine and its accompanying MIT notice.
+https://github.com/ganeshrvel/go-mtpx/tree/18f12db021cc
+
+libusb 1.0.26 (LGPL-2.1 or later). COPYING and upstream source archive included.
+https://github.com/libusb/libusb/releases/tag/v1.0.26
+The bundled libusb has not been modified other than local code signing.
+You may inspect, modify, reverse engineer for debugging modifications, and replace
+this LGPL component. Build the included source with configure/make on macOS.
+Install its dylib as Pori.app/Contents/Frameworks/libusb.dylib; its install name
+should be @loader_path/libusb.dylib. Re-sign the dylib and Pori.app ad hoc using
+codesign --force --sign -. Pori does not enable hardened library validation.
+
+Pori's build script reads the existing OpenMTP installation without modifying it.
+The engine is dynamically loaded by a helper, separate from the Swift UI.
