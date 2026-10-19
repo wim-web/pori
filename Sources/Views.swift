@@ -40,6 +40,7 @@ struct ContentView: View {
         .alert("確認してください", isPresented: $model.showError) {
             Button("閉じる", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "") }
+        .sheet(item: $model.nameEditRequest) { request in NameEditorView(model: model, request: request) }
     }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -85,7 +86,7 @@ struct ContentView: View {
                 else { Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(poriTint) }
                 Text(model.status).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer(minLength: 8)
-                if model.busyUSB && !model.transferring && !model.deleting { Button("中止") { model.cancel() }.controlSize(.small) }
+                if model.busyUSB && !model.transferring && !model.deleting && !model.editingRemote { Button("中止") { model.cancel() }.controlSize(.small) }
             }.padding(.horizontal, 26).padding(.vertical, 13)
         }
     }
@@ -224,6 +225,7 @@ struct AndroidView: View {
                         Label("Androidの保存先", systemImage: "folder").font(.system(size: 12, weight: .semibold))
                         Spacer()
                         if model.connected {
+                            Button { model.newFolder() } label: { Label("新規フォルダ", systemImage: "folder.badge.plus") }.disabled(model.busy)
                             Button { model.browse() } label: { Image(systemName: "arrow.clockwise") }.help("再読み込み").disabled(model.busy)
                         }
                     }
@@ -289,7 +291,9 @@ struct AndroidView: View {
                 TableColumn("サイズ") { file in Text(file.isFolder ? "—" : byteString(file.size)).foregroundStyle(.secondary) }.width(75)
             }
             .contextMenu(forSelectionType: String.self) { selected in
+                Button("新規フォルダ…") { model.newFolder() }.disabled(model.busy)
                 if let folder = selectedFolder(selected) { Button("フォルダを開く") { model.browse(folder.path) } }
+                Button("名前を変更…") { model.rename(selected) }.disabled(selected.count != 1 || model.busy)
                 Button("Macに保存") { model.selectedRemote = selected; model.download() }.disabled(selected.isEmpty || model.busy)
                 Divider()
                 Button("Androidから削除…", role: .destructive) { model.confirmDeletion(selected) }.disabled(selected.isEmpty || model.busy)
@@ -310,6 +314,7 @@ struct AndroidView: View {
             Divider()
             HStack {
                 Button { model.download() } label: { Label("Macに保存", systemImage: "arrow.down.to.line") }.disabled(model.selectedRemote.isEmpty || model.busy)
+                Button { model.rename() } label: { Image(systemName: "pencil") }.help("名前を変更").accessibilityLabel("名前を変更").disabled(model.selectedRemote.count != 1 || model.busy)
                 Button(role: .destructive) { model.confirmDeletion() } label: { Label("削除…", systemImage: "trash") }.disabled(model.selectedRemote.isEmpty || model.busy)
                 Spacer(minLength: 4)
                 if let storage = model.selectedStorage { Text("空き \(byteString(storage.free))").font(.system(size: 10)).foregroundStyle(.secondary) }
@@ -345,7 +350,7 @@ struct ActivityView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 25) {
-            PageHeading(eyebrow: "ACTIVITY", title: "操作の履歴", subtitle: "今回の起動中に行った転送・削除が表示されます。")
+            PageHeading(eyebrow: "ACTIVITY", title: "操作の履歴", subtitle: "今回の起動中に行ったファイル操作が表示されます。")
             if model.activities.isEmpty {
                 Spacer()
                 VStack(spacing: 13) {

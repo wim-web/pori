@@ -14,6 +14,17 @@ with tempfile.TemporaryDirectory(prefix="pori-protocol-") as directory:
     requests.append({"id": 8, "command": "delete", "payload": delete_payload})
     for i, invalid in enumerate([[], ["/"], ["/Download/../Pictures"], ["relative.txt"]], start=9):
         requests.append({"id": i, "command": "delete", "payload": {"storageId": 65537, "Files": invalid}})
+    valid_name_requests = [
+        ("mkdir", {"storageId": 65537, "fullPath": "/Download/日本語 folder"}),
+        ("rename", {"storageId": 65537, "fullPath": "/Download/日本語 ' $.txt", "newFileName": "変更後.txt"}),
+    ]
+    for command, arguments in valid_name_requests:
+        requests.append({"id": len(requests) + 1, "command": command, "payload": arguments})
+    invalid_name_requests = [("mkdir", {"storageId": 65537, "fullPath": p}) for p in ["/", "/Download/../Books", "relative", "/Download/ ", "/Download/bad\\name"]]
+    invalid_name_requests += [("rename", {"storageId": 65537, "fullPath": "/Download/old.txt", "newFileName": name}) for name in ["", " ", ".", "..", "a/b", "a\\b", "line\nbreak"]]
+    invalid_name_requests += [("rename", {"storageId": 65537, "fullPath": "/", "newFileName": "root"})]
+    for command, arguments in invalid_name_requests:
+        requests.append({"id": len(requests) + 1, "command": command, "payload": arguments})
     payload = "".join(json.dumps(request) + "\n" for request in requests)
     output = subprocess.run([str(root / "Pori.app/Contents/MacOS/mtp-helper"), str(fake)], input=payload, text=True, capture_output=True, check=True, timeout=10)
     rows = [json.loads(line) for line in output.stdout.splitlines()]
@@ -25,7 +36,9 @@ with tempfile.TemporaryDirectory(prefix="pori-protocol-") as directory:
     assert completed[5]["result"]["errorType"] == "ErrorDeviceChanged"
     assert completed[6]["result"]["data"] is True
     assert completed[7]["result"]["testRequest"] == delete_payload
-    for rejected in completed[8:]:
+    for index, (_, arguments) in enumerate(valid_name_requests, start=12):
+        assert completed[index]["result"]["testRequest"] == arguments
+    for rejected in completed[8:12] + completed[14:]:
         assert rejected["result"]["errorType"] == "ProtocolError"
         assert "testRequest" not in rejected["result"]
-print("Native bridge: progress, Unicode, large sizes, device errors, deletion payload and invalid-target rejection passed")
+print("Native bridge: progress, Unicode, large sizes, device errors, delete/mkdir/rename payloads and invalid-target rejection passed")

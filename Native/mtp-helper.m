@@ -35,6 +35,16 @@ static void done(char *json) { callback(json, @"done"); }
 static void progress(char *json) { callback(json, @"progress"); }
 static void preprocess(char *json) { callback(json, @"preprocess"); }
 static void ignore(char *json) { free(json); }
+static BOOL validItemPath(id path) {
+    return [path isKindOfClass:NSString.class] && [path hasPrefix:@"/"] && ![path isEqual:@"/"] && [path isEqual:[path stringByStandardizingPath]];
+}
+static BOOL validName(id name) {
+    if (![name isKindOfClass:NSString.class]) return NO;
+    return [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length > 0
+        && ![name isEqual:@"."] && ![name isEqual:@".."]
+        && [name rangeOfString:@"/"].location == NSNotFound && [name rangeOfString:@"\\"].location == NSNotFound
+        && [name rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location == NSNotFound;
+}
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
@@ -46,8 +56,9 @@ int main(int argc, const char *argv[]) {
         if (!lib) { fprintf(stderr, "%s\n", dlerror()); return 70; }
         Simple init = dlsym(lib, "Initialize"), storages = dlsym(lib, "FetchStorages"), dispose = dlsym(lib, "Dispose");
         Input walk = dlsym(lib, "Walk"), exists = dlsym(lib, "FileExists"), deleteFile = dlsym(lib, "DeleteFile");
+        Input mkdir = dlsym(lib, "MakeDirectory"), rename = dlsym(lib, "RenameFile");
         Transfer upload = dlsym(lib, "UploadFiles"), download = dlsym(lib, "DownloadFiles");
-        if (!init || !storages || !dispose || !walk || !exists || !deleteFile || !upload || !download) return 70;
+        if (!init || !storages || !dispose || !walk || !exists || !deleteFile || !mkdir || !rename || !upload || !download) return 70;
         char *line = NULL; size_t capacity = 0; ssize_t length;
         while ((length = getline(&line, &capacity, stdin)) > 0) {
             @autoreleasepool {
@@ -62,6 +73,19 @@ int main(int argc, const char *argv[]) {
                 else if ([command isEqual:@"storages"]) storages((Callback *)done);
                 else if ([command isEqual:@"list"]) walk(input, (Callback *)done);
                 else if ([command isEqual:@"exists"]) exists(input, (Callback *)done);
+                else if ([command isEqual:@"mkdir"] || [command isEqual:@"rename"]) {
+                    NSDictionary *arguments = request[@"payload"];
+                    id fullPath = arguments[@"fullPath"];
+                    BOOL valid = [arguments[@"storageId"] unsignedLongLongValue] > 0 && validItemPath(fullPath);
+                    if ([command isEqual:@"mkdir"]) {
+                        valid = valid && validName([fullPath lastPathComponent]);
+                        if (valid) mkdir(input, (Callback *)done);
+                    } else {
+                        valid = valid && validName(arguments[@"newFileName"]);
+                        if (valid) rename(input, (Callback *)done);
+                    }
+                    if (!valid) emit(@"done", @{ @"error": @"Invalid folder or filename", @"errorType": @"ProtocolError" });
+                }
                 else if ([command isEqual:@"delete"]) {
                     NSDictionary *arguments = request[@"payload"];
                     NSArray *paths = arguments[@"Files"];

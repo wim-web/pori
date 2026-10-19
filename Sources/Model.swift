@@ -48,6 +48,16 @@ struct Activity: Identifiable {
     let success: Bool?
     let date = Date()
 }
+struct NameEditRequest: Identifiable {
+    let id = UUID()
+    let storageID: UInt32
+    let parent: String
+    let location: String
+    let source: RemoteFile?
+    var title: String { source == nil ? "新規フォルダ" : "名前を変更" }
+    var action: String { source == nil ? "作成" : "変更" }
+    var initialName: String { source?.name ?? "新規フォルダ" }
+}
 func fileIcon(_ name: String) -> String {
     let ext = (name as NSString).pathExtension.lowercased()
     if ["jpg", "jpeg", "png", "heic", "gif", "webp"].contains(ext) { return "photo" }
@@ -59,6 +69,25 @@ func fileIcon(_ name: String) -> String {
 func byteString(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
 
 enum TransferRules {
+    static func editingPath(_ parent: String, name: String) throws -> String {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw TransferError(message: "名前を入力してください。")
+        }
+        guard !name.contains("\\"), name.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw TransferError(message: "名前にバックスラッシュや改行・制御文字は使えません。")
+        }
+        guard parent.hasPrefix("/"), (parent as NSString).standardizingPath == parent else {
+            throw TransferError(message: "保存先を確認できません。フォルダを開き直してください。")
+        }
+        return try remotePath(parent, name)
+    }
+    static func renameTarget(_ selection: Set<String>, files: [RemoteFile], parent: String) throws -> RemoteFile {
+        guard selection.count == 1, let file = files.first(where: { selection.contains($0.id) }),
+              file.path == (try remotePath(parent, file.name)) else {
+            throw TransferError(message: "名前を変更する項目を1つ選んでください。")
+        }
+        return file
+    }
     static func deletionTargets(_ selection: Set<String>, files: [RemoteFile], parent: String) throws -> [RemoteFile] {
         let targets = files.filter { selection.contains($0.id) }
         guard !selection.isEmpty, targets.count == selection.count,
@@ -94,12 +123,12 @@ enum TransferRules {
         guard info.isSymbolicLink != true, info.isRegularFile == true || info.isDirectory == true else { throw TransferError(message: "シンボリックリンクや特殊ファイルはUSB転送できません：\(url.lastPathComponent)") }
         guard FileManager.default.isReadableFile(atPath: url.path) else { throw TransferError(message: "読み取り権限がありません：\(url.lastPathComponent)") }
     }
-    static func verifyNoConflicts(_ raw: Any, targets: [String]) throws {
+    static func verifyNoConflicts(_ raw: Any, targets: [String], location: String = "転送先") throws {
         guard let rows = raw as? [[String: Any]], rows.count == targets.count else { throw TransferError(message: "転送先の存在確認ができませんでした。") }
         var seen = Set<String>()
         for row in rows {
             guard let path = row["fullpath"] as? String, let exists = row["exists"] as? Bool, targets.contains(path), seen.insert(path).inserted else { throw TransferError(message: "転送先の確認結果が不正です。") }
-            if exists { throw TransferError(message: "転送先に同名の項目があります：\((path as NSString).lastPathComponent)\n名前を変えるか、別のフォルダを選んでください。") }
+            if exists { throw TransferError(message: "\(location)に同名の項目があります：\((path as NSString).lastPathComponent)\n名前を変えるか、別のフォルダを選んでください。") }
         }
     }
 }
@@ -122,6 +151,8 @@ enum TransferRules {
     @Published var transferring = false
     @Published var deleting = false
     @Published var confirmingDeletion = false
+    @Published var nameEditRequest: NameEditRequest?
+    @Published var editingRemote = false
     @Published var progress: Double?
     @Published var progressText = ""
     @Published var status = "ファイルを追加して、送り先を選んでください。"
@@ -130,7 +161,7 @@ enum TransferRules {
     let backend = MTPBackend()
     let airDrop = AirDropSender()
     private var cancelRequested = false
-    var busy: Bool { busyUSB || busyAirDrop || confirmingDeletion }
+    var busy: Bool { busyUSB || busyAirDrop || confirmingDeletion || nameEditRequest != nil }
     var selectedStorage: Storage? { storages.first { $0.id == storageID } }
     var filteredFiles: [RemoteFile] { search.isEmpty ? files : files.filter { $0.name.localizedCaseInsensitiveContains(search) } }
     var destinationFolderName: String { path == "/" ? "ストレージの先頭" : (path as NSString).lastPathComponent }
@@ -312,6 +343,65 @@ enum TransferRules {
         }
     }
     func up() { browse(path == "/" ? "/" : (path as NSString).deletingLastPathComponent) }
+
+    func newFolder() {
+        guard connected, !busy else { return }
+        nameEditRequest = NameEditRequest(storageID: storageID, parent: path, location: "\(deviceName) · \(destinationLabel)", source: nil)
+    }
+
+    func rename(_ selection: Set<String>? = nil) {
+        guard connected, !busy else { return }
+        do {
+            let source = try TransferRules.renameTarget(selection ?? selectedRemote, files: files, parent: path)
+            nameEditRequest = NameEditRequest(storageID: storageID, parent: path, location: "\(deviceName) · \(destinationLabel)", source: source)
+        } catch { report(error) }
+    }
+
+    func commitNameEdit(_ request: NameEditRequest, name: String) {
+        guard nameEditRequest?.id == request.id, connected, !busyUSB, !busyAirDrop, !confirmingDeletion,
+              request.storageID == storageID, request.parent == path else { return }
+        let newPath: String
+        do { newPath = try TransferRules.editingPath(request.parent, name: name) }
+        catch { nameEditRequest = nil; report(error); return }
+        if name == request.source?.name { nameEditRequest = nil; return }
+        nameEditRequest = nil
+        busyUSB = true
+        editingRemote = true
+        status = request.source == nil ? "フォルダを作成しています…" : "名前を変更しています…"
+        Task {
+            defer { busyUSB = false; editingRemote = false }
+            var applied = false
+            do {
+                let existing = try await backend.call("exists", ["storageId": request.storageID, "Files": [newPath]])
+                try TransferRules.verifyNoConflicts(existing, targets: [newPath], location: request.source == nil ? "作成先" : "変更先")
+                let result: Any
+                applied = true
+                if let source = request.source {
+                    result = try await backend.call("rename", ["storageId": request.storageID, "fullPath": source.path, "newFileName": name])
+                } else {
+                    result = try await backend.call("mkdir", ["storageId": request.storageID, "fullPath": newPath])
+                }
+                guard result as? Bool == true else { throw TransferError(message: "操作の結果を確認できませんでした。") }
+                try await loadFolder()
+                guard files.contains(where: { $0.path == newPath && $0.isFolder == (request.source?.isFolder ?? true) }),
+                      request.source == nil || !files.contains(where: { $0.path == request.source?.path }) else {
+                    throw TransferError(message: "変更後の項目を一覧で確認できませんでした。再読み込みしてください。")
+                }
+                search = ""
+                selectedRemote = [newPath]
+                status = request.source == nil ? "「\(name)」を作成しました。" : "「\(name)」に名前を変更しました。"
+                record(request.source == nil ? "フォルダを作成" : "名前を変更", request.source.map { "\($0.path) → \(newPath)" } ?? newPath, success: true)
+            } catch {
+                let failure = error.localizedDescription
+                if applied {
+                    do { try await loadFolder() } catch { resetUSB() }
+                    record("操作結果の確認が必要", newPath, success: false)
+                }
+                status = "\(request.action)を完了できませんでした。"
+                report(TransferError(message: failure + (applied ? "\n\n操作が反映されている可能性があります。再実行する前に一覧を確認してください。" : "")))
+            }
+        }
+    }
 
     func confirmDeletion(_ selection: Set<String>? = nil) {
         guard connected, !busy else { return }

@@ -25,11 +25,11 @@ import SwiftUI
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window?.makeKeyAndOrderFront(nil); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if model.transferring || model.deleting {
+        if model.transferring || model.deleting || model.editingRemote {
             let alert = NSAlert()
-            alert.messageText = model.deleting ? "削除処理中に終了しますか？" : "転送を中止して終了しますか？"
-            alert.informativeText = model.deleting ? "一部の項目がすでに削除されている可能性があります。" : "転送途中のファイルが残る場合があります。"
-            alert.addButton(withTitle: model.deleting ? "処理を続ける" : "転送を続ける")
+            alert.messageText = model.editingRemote ? "ファイル操作の処理中に終了しますか？" : model.deleting ? "削除処理中に終了しますか？" : "転送を中止して終了しますか？"
+            alert.informativeText = model.editingRemote ? "操作がすでに反映されている可能性があります。" : model.deleting ? "一部の項目がすでに削除されている可能性があります。" : "転送途中のファイルが残る場合があります。"
+            alert.addButton(withTitle: model.deleting || model.editingRemote ? "処理を続ける" : "転送を続ける")
             alert.addButton(withTitle: "中止して終了")
             if alert.runModal() == .alertFirstButtonReturn { return .terminateCancel }
         }

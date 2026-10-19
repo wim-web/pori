@@ -19,6 +19,17 @@ func runSelfTests() throws {
     let deleteFiles = [RemoteFile(name: "日本語 ' $.txt", path: "/Download/日本語 ' $.txt", size: 10, isFolder: false), RemoteFile(name: "Folder", path: "/Download/Folder", size: 0, isFolder: true)]
     let deletion = try TransferRules.deletionTargets(Set(deleteFiles.map(\.path)), files: deleteFiles, parent: "/Download")
     try check(deletion.count == 2 && deletion[0].path == deleteFiles[0].path && deletion[1].isFolder, "Exact selected files and folders for deletion")
+    try check(try TransferRules.editingPath("/Download", name: "日本語 folder") == "/Download/日本語 folder", "New folder remains under selected parent")
+    for invalid in ["", "   ", ".", "..", "a/b", "a\\b", "line\nbreak", "null\0char"] {
+        try rejects({ _ = try TransferRules.editingPath("/Download", name: invalid) }, "Invalid name")
+    }
+    try rejects({ _ = try TransferRules.editingPath("/Download/..", name: "x") }, "Unnormalized parent")
+    for target in deleteFiles {
+        try check(try TransferRules.renameTarget([target.path], files: deleteFiles, parent: "/Download").path == target.path, "Files and folders can be renamed")
+    }
+    try rejects({ _ = try TransferRules.renameTarget([], files: deleteFiles, parent: "/Download") }, "Empty rename selection")
+    try rejects({ _ = try TransferRules.renameTarget(Set(deleteFiles.map(\.path)), files: deleteFiles, parent: "/Download") }, "Multiple rename selection")
+    try rejects({ _ = try TransferRules.renameTarget([deleteFiles[0].path], files: deleteFiles, parent: "/Pictures") }, "Rename from wrong parent")
     try rejects({ _ = try TransferRules.deletionTargets([], files: deleteFiles, parent: "/Download") }, "Empty deletion")
     try rejects({ _ = try TransferRules.deletionTargets(["/Download/missing"], files: deleteFiles, parent: "/Download") }, "Stale selection")
     try rejects({ _ = try TransferRules.deletionTargets([deleteFiles[0].path], files: deleteFiles, parent: "/Pictures") }, "Wrong parent")
