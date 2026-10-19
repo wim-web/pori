@@ -49,7 +49,7 @@ struct ContentView: View {
             }.padding(.bottom, 34)
             Text("ライブラリ").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
             nav("iPhone / AirDrop", icon: "paperplane", page: .send)
-            nav("転送の履歴", icon: "clock", page: .activity)
+            nav("操作の履歴", icon: "clock", page: .activity)
             Text("デバイス").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.top, 28).padding(.bottom, 9)
             nav("Androidと転送", icon: "smartphone", page: .android)
             HStack(spacing: 6) {
@@ -85,7 +85,7 @@ struct ContentView: View {
                 else { Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(poriTint) }
                 Text(model.status).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer(minLength: 8)
-                if model.busyUSB && !model.transferring { Button("中止") { model.cancel() }.controlSize(.small) }
+                if model.busyUSB && !model.transferring && !model.deleting { Button("中止") { model.cancel() }.controlSize(.small) }
             }.padding(.horizontal, 26).padding(.vertical, 13)
         }
     }
@@ -291,6 +291,8 @@ struct AndroidView: View {
             .contextMenu(forSelectionType: String.self) { selected in
                 if let folder = selectedFolder(selected) { Button("フォルダを開く") { model.browse(folder.path) } }
                 Button("Macに保存") { model.selectedRemote = selected; model.download() }.disabled(selected.isEmpty || model.busy)
+                Divider()
+                Button("Androidから削除…", role: .destructive) { model.confirmDeletion(selected) }.disabled(selected.isEmpty || model.busy)
             } primaryAction: { selected in
                 if let folder = selectedFolder(selected) { model.browse(folder.path) }
             }
@@ -308,6 +310,7 @@ struct AndroidView: View {
             Divider()
             HStack {
                 Button { model.download() } label: { Label("Macに保存", systemImage: "arrow.down.to.line") }.disabled(model.selectedRemote.isEmpty || model.busy)
+                Button(role: .destructive) { model.confirmDeletion() } label: { Label("削除…", systemImage: "trash") }.disabled(model.selectedRemote.isEmpty || model.busy)
                 Spacer(minLength: 4)
                 if let storage = model.selectedStorage { Text("空き \(byteString(storage.free))").font(.system(size: 10)).foregroundStyle(.secondary) }
             }
@@ -342,12 +345,12 @@ struct ActivityView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 25) {
-            PageHeading(eyebrow: "ACTIVITY", title: "転送の履歴", subtitle: "今回の起動中に行った転送が表示されます。")
+            PageHeading(eyebrow: "ACTIVITY", title: "操作の履歴", subtitle: "今回の起動中に行った転送・削除が表示されます。")
             if model.activities.isEmpty {
                 Spacer()
                 VStack(spacing: 13) {
                     Image(systemName: "clock.arrow.circlepath").font(.system(size: 35, weight: .light)).foregroundStyle(poriTint)
-                    Text("まだ転送はありません").font(.system(size: 15, weight: .medium))
+                    Text("まだ操作の履歴はありません").font(.system(size: 15, weight: .medium))
                     Button("ファイルを送る") { model.selectPage(.send) }.controlSize(.large)
                 }.frame(maxWidth: .infinity)
                 Spacer()

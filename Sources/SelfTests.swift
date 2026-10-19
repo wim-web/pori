@@ -16,6 +16,14 @@ func runSelfTests() throws {
     try rejects({ try TransferRules.verifyNoConflicts([["fullpath": "/a", "exists": true]], targets: ["/a"]) }, "Overwrite")
     try rejects({ try TransferRules.verifyNoConflicts([], targets: ["/a"]) }, "Missing collision response")
     try TransferRules.verifyNoConflicts([["fullpath": "/a", "exists": false]], targets: ["/a"])
+    let deleteFiles = [RemoteFile(name: "日本語 ' $.txt", path: "/Download/日本語 ' $.txt", size: 10, isFolder: false), RemoteFile(name: "Folder", path: "/Download/Folder", size: 0, isFolder: true)]
+    let deletion = try TransferRules.deletionTargets(Set(deleteFiles.map(\.path)), files: deleteFiles, parent: "/Download")
+    try check(deletion.count == 2 && deletion[0].path == deleteFiles[0].path && deletion[1].isFolder, "Exact selected files and folders for deletion")
+    try rejects({ _ = try TransferRules.deletionTargets([], files: deleteFiles, parent: "/Download") }, "Empty deletion")
+    try rejects({ _ = try TransferRules.deletionTargets(["/Download/missing"], files: deleteFiles, parent: "/Download") }, "Stale selection")
+    try rejects({ _ = try TransferRules.deletionTargets([deleteFiles[0].path], files: deleteFiles, parent: "/Pictures") }, "Wrong parent")
+    let rootTarget = RemoteFile(name: "..", path: "/", size: 0, isFolder: true)
+    try rejects({ _ = try TransferRules.deletionTargets(["/"], files: [rootTarget], parent: "/") }, "Root deletion")
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("pori-tests-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }

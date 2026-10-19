@@ -59,6 +59,19 @@ func fileIcon(_ name: String) -> String {
 func byteString(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
 
 enum TransferRules {
+    static func deletionTargets(_ selection: Set<String>, files: [RemoteFile], parent: String) throws -> [RemoteFile] {
+        let targets = files.filter { selection.contains($0.id) }
+        guard !selection.isEmpty, targets.count == selection.count,
+              parent.hasPrefix("/"), (parent as NSString).standardizingPath == parent else {
+            throw TransferError(message: "削除対象を確認できません。一覧を更新して選び直してください。")
+        }
+        for file in targets {
+            guard file.path == (try remotePath(parent, file.name)) else {
+                throw TransferError(message: "現在のフォルダ以外の項目は削除できません。")
+            }
+        }
+        return targets
+    }
     static func remotePath(_ parent: String, _ name: String) throws -> String {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { throw TransferError(message: "扱えないファイル名です。") }
         return parent == "/" ? "/" + name : parent + "/" + name
@@ -107,6 +120,8 @@ enum TransferRules {
     @Published var busyUSB = false
     @Published var busyAirDrop = false
     @Published var transferring = false
+    @Published var deleting = false
+    @Published var confirmingDeletion = false
     @Published var progress: Double?
     @Published var progressText = ""
     @Published var status = "ファイルを追加して、送り先を選んでください。"
@@ -115,7 +130,7 @@ enum TransferRules {
     let backend = MTPBackend()
     let airDrop = AirDropSender()
     private var cancelRequested = false
-    var busy: Bool { busyUSB || busyAirDrop }
+    var busy: Bool { busyUSB || busyAirDrop || confirmingDeletion }
     var selectedStorage: Storage? { storages.first { $0.id == storageID } }
     var filteredFiles: [RemoteFile] { search.isEmpty ? files : files.filter { $0.name.localizedCaseInsensitiveContains(search) } }
     var destinationFolderName: String { path == "/" ? "ストレージの先頭" : (path as NSString).lastPathComponent }
@@ -297,6 +312,68 @@ enum TransferRules {
         }
     }
     func up() { browse(path == "/" ? "/" : (path as NSString).deletingLastPathComponent) }
+
+    func confirmDeletion(_ selection: Set<String>? = nil) {
+        guard connected, !busy else { return }
+        let targets: [RemoteFile]
+        do { targets = try TransferRules.deletionTargets(selection ?? selectedRemote, files: files, parent: path) }
+        catch { report(error); return }
+        let sourceStorageID = storageID
+        let sourcePath = path
+        let sourceDescription = destinationLabel
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = targets.count == 1 ? "「\(targets[0].name)」を削除しますか？" : "\(targets.count)項目をAndroidから削除しますか？"
+        alert.informativeText = "\(deviceName) · \(sourceDescription)\n\nゴミ箱には入りません。削除すると元に戻せません。" + (targets.contains(where: \.isFolder) ? "フォルダの中身も削除されます。" : "")
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 420, height: CGFloat(min(180, max(60, targets.count * 22)))))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: CGFloat(max(60, targets.count * 22))))
+        text.string = targets.map(\.path).joined(separator: "\n")
+        text.isEditable = false
+        text.isSelectable = true
+        text.font = .systemFont(ofSize: 12)
+        text.textContainerInset = NSSize(width: 7, height: 7)
+        text.autoresizingMask = [.width]
+        scroll.documentView = text
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "キャンセル")
+        alert.addButton(withTitle: "削除する")
+        alert.buttons[0].keyEquivalent = "\r"
+        alert.buttons[1].keyEquivalent = ""
+        alert.buttons[1].hasDestructiveAction = true
+        confirmingDeletion = true
+        let response = alert.runModal()
+        confirmingDeletion = false
+        guard response == .alertSecondButtonReturn else { return }
+        guard connected, !busy, storageID == sourceStorageID, path == sourcePath else {
+            report(TransferError(message: "接続先が変わりました。削除対象を選び直してください。")); return
+        }
+        busyUSB = true
+        deleting = true
+        status = "\(targets.count)項目を削除しています…"
+        Task {
+            defer { busyUSB = false; deleting = false }
+            let requestedPaths = Set(targets.map(\.path))
+            do {
+                let result = try await backend.call("delete", ["storageId": sourceStorageID, "Files": targets.map(\.path)])
+                guard result as? Bool == true else { throw TransferError(message: "削除結果を確認できませんでした。") }
+                // Some MTP engines return success before processing every requested item.
+                // Re-read the directory before reporting completion; never retry deletion automatically.
+                try await loadFolder()
+                let remaining = requestedPaths.intersection(files.map(\.path))
+                guard remaining.isEmpty else { throw TransferError(message: "\(remaining.count)項目が残っています。一覧を確認してください。") }
+                status = "\(targets.count)項目をAndroidから削除しました。"
+                record("Androidから削除", "\(targets.count)項目 · \(sourceDescription)", success: true)
+            } catch {
+                let failure = error.localizedDescription
+                do { try await loadFolder() } catch { resetUSB() }
+                status = "削除の完了を確認できませんでした。"
+                record("削除結果の確認が必要", "\(sourceDescription) · 一部が削除されている可能性があります。", success: false)
+                report(TransferError(message: "\(failure)\n\n一部の項目が削除されている可能性があります。再実行する前に一覧を確認してください。"))
+            }
+        }
+    }
 
     private func upload() {
         guard connected else { report(TransferError(message: "先にAndroidへUSB接続してください。")); return }
