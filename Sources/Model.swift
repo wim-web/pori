@@ -146,6 +146,15 @@ enum TransferRules {
         let info = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey])
         guard info.isSymbolicLink != true, info.isRegularFile == true || info.isDirectory == true else { throw TransferError(message: "シンボリックリンクや特殊ファイルはUSB転送できません：\(url.lastPathComponent)") }
         guard FileManager.default.isReadableFile(atPath: url.path) else { throw TransferError(message: "読み取り権限がありません：\(url.lastPathComponent)") }
+        try validateAndroidName(url.lastPathComponent, path: url.path)
+    }
+    static func validateAndroidName(_ name: String, path: String) throws {
+        // Android storage commonly limits each filename to 255 UTF-8 bytes. Use
+        // the actual spelling sent by the engine, including combining characters.
+        let count = name.utf8.count
+        guard count <= 255 else {
+            throw TransferError(message: "名前がAndroidのファイル名上限（UTF-8で255バイト）を超えています（\(count)バイト）。Mac上で名前を短くしてから、追加し直してください：\n\(path)")
+        }
     }
     static func verifyNoConflicts(_ raw: Any, targets: [String], location: String = "転送先") throws {
         guard let rows = raw as? [[String: Any]], rows.count == targets.count else { throw TransferError(message: "転送先の存在確認ができませんでした。") }

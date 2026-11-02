@@ -98,6 +98,9 @@ struct TransferError: LocalizedError {
     }
 
     static func friendlyError(_ kind: String, detail: String) -> String {
+        if detail.localizedCaseInsensitiveContains("PartialDeletion") {
+            return "Androidが一部の項目を削除できませんでした（PartialDeletion）。接続し直して一覧を更新し、端末側のファイルも確認してください。"
+        }
         switch kind {
         case "ErrorMtpDetectFailed": return "Androidが見つかりません。USBで接続し、端末のUSB設定を「ファイル転送」にしてください。OpenMTPなどほかの転送アプリは終了してください。"
         case "ErrorMultipleDevice": return "Androidは1台ずつ接続してください。"
